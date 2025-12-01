@@ -7,8 +7,8 @@ plugins {
 }
 
 android {
-    namespace = "com.tripandevent.sanbot"
     compileSdk = 34
+    namespace = "com.tripandevent.sanbot"
 
     defaultConfig {
         applicationId = "com.tripandevent.sanbot"
@@ -72,9 +72,10 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
+    // Hilt
+    implementation("com.google.dagger:hilt-android:2.51")
+    ksp("com.google.dagger:hilt-compiler:2.51")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
