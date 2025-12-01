@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_blue">#0066CC</color>
+    <color name="brand_orange">#FF6B35</color>
+    <color name="dark_gray">#2C3E50</color>
+    <color name="light_gray">#ECF0F1</color>
+    <color name="white">#FFFFFF</color>
+    <color name="success_green">#27AE60</color>
+    <color name="warning_yellow">#F39C12</color>
+    <color name="error_red">#E74C3C</color>
+</resources>
