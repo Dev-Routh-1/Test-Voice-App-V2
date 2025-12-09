@@ -2,11 +2,19 @@ package com.tripandevent.sanbot.data.models
 
 import com.google.gson.annotations.SerializedName
 
+/**
+ * Generic API response wrapper for all endpoints.
+ * All successful responses follow this structure.
+ */
 data class ApiResponse<T>(
     @SerializedName("success") val success: Boolean,
     @SerializedName("error") val error: ApiError? = null
 )
 
+/**
+ * Standard error response structure from API.
+ * All errors return this format with specific error codes.
+ */
 data class ApiError(
     @SerializedName("code") val code: String,
     @SerializedName("message") val message: String,

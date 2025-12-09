@@ -7,12 +7,17 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.tripandevent.sanbot.BuildConfig
 import com.tripandevent.sanbot.data.api.SanbotApiService
 import com.tripandevent.sanbot.data.repository.SettingsRepository
+import com.tripandevent.sanbot.utils.RateLimitInterceptor
+import com.tripandevent.sanbot.utils.RetryInterceptor
 import dagger.Module
 import dagger.Provides
+import javax.inject.Named
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.Interceptor
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -29,6 +34,11 @@ object NetworkModule {
 
     private const val DEFAULT_BASE_URL = "https://bot.tripandevent.com/api/"
     private const val DEFAULT_API_KEY = "test_sanbot_key_abc123xyz789"
+    
+    // Timeout configuration
+    private const val CONNECT_TIMEOUT_SECONDS = 30L
+    private const val READ_TIMEOUT_SECONDS = 30L
+    private const val WRITE_TIMEOUT_SECONDS = 30L
 
     private val currentApiKey = AtomicReference(DEFAULT_API_KEY)
     private val currentBaseUrl = AtomicReference(DEFAULT_BASE_URL)
@@ -52,11 +62,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    @Named("auth_interceptor")
     fun provideAuthInterceptor(): Interceptor {
         return Interceptor { chain ->
             val apiKey = currentApiKey.get() ?: DEFAULT_API_KEY
             val request = chain.request().newBuilder()
-                .addHeader("X-API-KEY", apiKey)
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Accept", "application/json")
@@ -67,7 +77,67 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(authInterceptor: Interceptor): OkHttpClient {
+    @Named("base_url_interceptor")
+    fun provideBaseUrlInterceptor(): Interceptor {
+        return Interceptor { chain ->
+            val request = chain.request()
+            val currentBase = currentBaseUrl.get() ?: DEFAULT_BASE_URL
+
+            // Build new URL by replacing base with currentBase while keeping the request path
+            val base = try {
+                // Ensure the base is a valid HttpUrl using Kotlin extension
+                currentBase.toHttpUrlOrNull()
+            } catch (e: Exception) {
+                null
+            }
+
+            val newUrl = if (base != null) {
+                // Concatenate base and relative path
+                val baseStr = currentBase.trimEnd('/')
+                val relPath = request.url.encodedPath.trimStart('/')
+                val query = request.url.encodedQuery
+                val combined = if (query.isNullOrEmpty()) {
+                    "$baseStr/$relPath"
+                } else {
+                    "$baseStr/$relPath?$query"
+                }
+                try {
+                    combined.toHttpUrlOrNull() ?: request.url
+                } catch (e: Exception) {
+                    request.url
+                }
+            } else {
+                request.url
+            }
+
+            val newRequest = request.newBuilder()
+                .url(newUrl)
+                .build()
+
+            chain.proceed(newRequest)
+        }
+    }
+
+    @Provides
+    @Singleton
+    fun provideRetryInterceptor(): RetryInterceptor {
+        return RetryInterceptor(maxRetries = 3, initialDelayMs = 1000)
+    }
+
+    @Provides
+    @Singleton
+    fun provideRateLimitInterceptor(): RateLimitInterceptor {
+        return RateLimitInterceptor()
+    }
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(
+        @Named("base_url_interceptor") baseUrlInterceptor: Interceptor,
+        @Named("auth_interceptor") authInterceptor: Interceptor,
+        retryInterceptor: RetryInterceptor,
+        rateLimitInterceptor: RateLimitInterceptor
+    ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
@@ -77,19 +147,29 @@ object NetworkModule {
         }
 
         return OkHttpClient.Builder()
+            // Base URL interceptor must run first to adjust URL to current base
+            .addInterceptor(baseUrlInterceptor)
+            // Retry logic should be next
+            .addInterceptor(retryInterceptor)
+            // Rate limit tracking
+            .addInterceptor(rateLimitInterceptor)
+            // Authentication headers
             .addInterceptor(authInterceptor)
+            // Logging for debugging
             .addInterceptor(loggingInterceptor)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            // Connection timeouts
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
     }
 
     @Provides
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit {
+        val baseUrl = currentBaseUrl.get() ?: DEFAULT_BASE_URL
         return Retrofit.Builder()
-            .baseUrl(DEFAULT_BASE_URL)
+            .baseUrl(baseUrl)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
